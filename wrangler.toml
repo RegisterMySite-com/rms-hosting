@@ -1,0 +1,40 @@
+name = "rms-hosting"
+main = "src/index.ts"
+compatibility_date = "2026-10-06"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+# Shared with registermysite-account. This Worker only reads DOMAIN_MAP.
+# Replace the id with the namespace already bound on the account Worker:
+#   npx wrangler kv namespace list
+# Do not create a second namespace unless the account Worker has none yet.
+[[kv_namespaces]]
+binding = "DOMAIN_MAP"
+id = "00000000000000000000000000000001"
+
+# Optional at runtime. If a binding is missing, the Worker falls back to
+# public fetch(ORIGIN + path) and logs a warning.
+[[services]]
+binding = "HTML_STUDIO"
+service = "html-studio"
+
+[[services]]
+binding = "WRANGLER"
+service = "rms-wrangler"
+
+# Optional traffic counters for the dashboard. Uncomment to enable.
+# [[analytics_engine_datasets]]
+# binding = "HOSTING_ANALYTICS"
+# dataset = "rms_hosting"
+
+[vars]
+HTML_STUDIO_ORIGIN = "https://sites.registermysite.com"
+WRANGLER_ORIGIN = "https://wrangler.registermysite.com"
+WRANGLER_PREFIX = "/s/"
+PLATFORM_HOSTS = "registermysite.com,www.registermysite.com,sites.registermysite.com,wrangler.registermysite.com,html-studio.registermysite.com,account.registermysite.com"
+EDGE_CACHE_TTL = "60"
+DEV_HOST_OVERRIDE = "false"
+
+[observability]
+enabled = true
+head_sampling_rate = 1

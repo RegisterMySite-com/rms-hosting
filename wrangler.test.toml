@@ -1,0 +1,17 @@
+name = "rms-hosting"
+main = "src/index.ts"
+compatibility_date = "2025-12-10"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[[kv_namespaces]]
+binding = "DOMAIN_MAP"
+id = "00000000000000000000000000000001"
+
+[vars]
+HTML_STUDIO_ORIGIN = "https://sites.registermysite.com"
+WRANGLER_ORIGIN = "https://wrangler.registermysite.com"
+WRANGLER_PREFIX = "/s/"
+PLATFORM_HOSTS = "registermysite.com,www.registermysite.com,sites.registermysite.com,wrangler.registermysite.com,html-studio.registermysite.com,account.registermysite.com"
+EDGE_CACHE_TTL = "60"
+DEV_HOST_OVERRIDE = "true"
