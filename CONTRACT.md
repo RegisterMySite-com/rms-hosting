@@ -59,4 +59,6 @@ The account Worker was told: key = host, value `{ app, ref, site_id }`.
 
 ## Hosting check
 
-`GET https://<domain>/__rms/whoami` returns `200` and `{ site_id, app, canonical }` with `x-rms-host: <site_id>` and `Cache-Control: no-store`. An unmapped host returns `404`.
+`GET https://<domain>/__rms/whoami` returns `200` and `{ site_id, app, ref, canonical, version }` with `x-rms-host: <site_id>` and `Cache-Control: no-store`. `canonical` is the configured host (`example.com` or `www.example.com`), not the host that was requested. An unmapped host returns `404`.
+
+`GET /__rms/health` returns `{ mapped, status, app, ref, version, canonical }`. `version` is the worker version. `canonical` is the configured host, or `null` when the host is not mapped.

@@ -15,9 +15,11 @@ export function rewriteHtml(response: Response, ctx: RewriteCtx, path: string, s
     .on("link", {
       element(el) {
         const rel = (el.getAttribute("rel") || "").toLowerCase();
-        if (rel.split(/\s+/).includes("canonical")) {
+        const rels = rel.split(/\s+/);
+        if (rels.includes("canonical")) {
           sawCanonical = true;
           el.setAttribute("href", canonical);
+          return;
         }
         rewriteAttr(el, "href", ctx);
       },
@@ -39,7 +41,9 @@ export function rewriteHtml(response: Response, ctx: RewriteCtx, path: string, s
     .on("meta", {
       element(el) {
         const prop = (el.getAttribute("property") || el.getAttribute("name") || "").toLowerCase();
-        if (prop === "og:url" || prop === "og:image") rewriteAttr(el, "content", ctx);
+        if (prop === "og:url" || prop === "og:image" || prop === "twitter:url" || prop === "twitter:image") {
+          rewriteAttr(el, "content", ctx);
+        }
         if (live && prop === "robots") {
           const content = (el.getAttribute("content") || "").toLowerCase();
           if (content.includes("noindex")) el.remove();

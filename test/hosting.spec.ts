@@ -4,8 +4,9 @@ import { parseMapping, kvKey } from "../src/contract";
 import { normalizeHost } from "../src/host";
 import { handle } from "../src/index";
 import { safePath } from "../src/path";
-import { rewriteAssetUrl, rewriteSrcset, type RewriteCtx } from "../src/rewrite";
+import { rewriteAssetUrl, rewriteSrcset, canonicalUrl, type RewriteCtx } from "../src/rewrite";
 import type { Env } from "../src/types";
+import { VERSION } from "../src/types";
 import { buildUpstreamUrl, cacheKeyUrl } from "../src/upstream";
 
 const SITE = "d9d3a4b2-1111-2222-3333-444444444444";
@@ -131,6 +132,8 @@ describe("rewrite", () => {
     expect(rewriteSrcset("/nightshade/a.jpg 1x, https://cdn.example/b.jpg 2x", ctx)).toBe(
       "https://example.com/a.jpg 1x, https://cdn.example/b.jpg 2x",
     );
+    expect(canonicalUrl("example.com", "/about/index.html", "?x=1")).toBe("https://example.com/about/");
+    expect(canonicalUrl("example.com", "//", "")).toBe("https://example.com/");
   });
 });
 
@@ -143,7 +146,7 @@ describe("handler", () => {
   it("answers health and hides platform hosts", async () => {
     const health = await handle(req("https://rms-hosting.example.workers.dev/__rms/health"), baseEnv(), createExecutionContext());
     expect(health.status).toBe(200);
-    expect(await health.json()).toMatchObject({ ok: true, mapped: false });
+    expect(await health.json()).toMatchObject({ mapped: false, version: VERSION, canonical: null });
     const blocked = await handle(req("https://sites.registermysite.com/"), baseEnv(), createExecutionContext());
     expect(blocked.status).toBe(404);
   });
@@ -160,6 +163,27 @@ describe("handler", () => {
     const http = await handle(req("http://example.com/about"), baseEnv(), createExecutionContext());
     expect(http.status).toBe(301);
     expect(http.headers.get("location")).toBe("https://example.com/about");
+  });
+
+  it("301s www to apex when both keys exist and canonical is omitted", async () => {
+    const minimal = { app: "html_studio", ref: "rms-pubtest", site_id: SITE };
+    await putMap("rmsflowtest1006.site", minimal);
+    await putMap("www.rmsflowtest1006.site", minimal);
+    const www = await handle(req("https://www.rmsflowtest1006.site/"), baseEnv(), createExecutionContext());
+    expect(www.status).toBe(301);
+    expect(www.headers.get("location")).toBe("https://rmsflowtest1006.site/");
+    const who = await handle(req("https://www.rmsflowtest1006.site/__rms/whoami"), baseEnv(), createExecutionContext());
+    expect(who.status).toBe(200);
+    expect(await who.json()).toMatchObject({ canonical: "rmsflowtest1006.site", app: "html_studio", ref: "rms-pubtest", version: VERSION });
+    const health = await handle(req("https://rmsflowtest1006.site/__rms/health"), baseEnv(), createExecutionContext());
+    expect(await health.json()).toEqual({
+      mapped: true,
+      status: "live",
+      app: "html_studio",
+      ref: "rms-pubtest",
+      version: VERSION,
+      canonical: "rmsflowtest1006.site",
+    });
   });
 
   it("blocks methods other than GET and HEAD", async () => {
@@ -224,6 +248,67 @@ describe("handler", () => {
     expect(jump.headers.get("set-cookie")).toBeNull();
   });
 
+  it("rewrites platform Location headers for studio and wrangler", async () => {
+    await putMap("example.com", live);
+    const studioRedirect = studioFetch((input) => {
+      const url = typeof input === "string" ? input : input.url;
+      const location = url.includes("/rel") ? "/nightshade/x" : "https://sites.registermysite.com/nightshade/x";
+      const status = url.includes("/rel") ? 302 : 301;
+      return new Response(null, { status, headers: { location } });
+    });
+    const abs = await handle(req("https://example.com/go"), baseEnv({ HTML_STUDIO: studioRedirect }), createExecutionContext());
+    expect(abs.status).toBe(301);
+    expect(abs.headers.get("location")).toBe("https://example.com/x");
+    const rel = await handle(req("https://example.com/rel"), baseEnv({ HTML_STUDIO: studioRedirect }), createExecutionContext());
+    expect(rel.status).toBe(302);
+    expect(rel.headers.get("location")).toBe("https://example.com/x");
+
+    await putMap("wrangler.example", { ...live, app: "wrangler" });
+    const wranglerRedirect = studioFetch((input) => {
+      const url = typeof input === "string" ? input : input.url;
+      const location = url.includes("/rel") ? "/s/nightshade/x" : "https://wrangler.registermysite.com/s/nightshade/x";
+      return new Response(null, { status: 301, headers: { location } });
+    });
+    const wabs = await handle(req("https://wrangler.example/go"), baseEnv({ WRANGLER: wranglerRedirect }), createExecutionContext());
+    expect(wabs.headers.get("location")).toBe("https://wrangler.example/x");
+    const wrel = await handle(req("https://wrangler.example/rel"), baseEnv({ WRANGLER: wranglerRedirect }), createExecutionContext());
+    expect(wrel.headers.get("location")).toBe("https://wrangler.example/x");
+  });
+
+  it("rewrites sitemap and robots bodies and drops the query from canonical", async () => {
+    await putMap("example.com", live);
+    const html = `<!doctype html><html><head>
+      <link rel="canonical" href="https://sites.registermysite.com/nightshade/?x=1">
+      <link rel="alternate" href="https://sites.registermysite.com/nightshade/feed.xml">
+      <meta name="twitter:url" content="https://sites.registermysite.com/nightshade/">
+      </head><body></body></html>`;
+    const binding = studioFetch((input) => {
+      const url = typeof input === "string" ? input : input.url;
+      if (url.includes("/sitemap.xml")) {
+        return new Response(`<url><loc>https://sites.registermysite.com/nightshade/</loc></url>`, {
+          headers: { "content-type": "application/xml" },
+        });
+      }
+      if (url.includes("/robots.txt")) {
+        return new Response("Sitemap: https://sites.registermysite.com/nightshade/sitemap.xml\n", {
+          headers: { "content-type": "text/plain" },
+        });
+      }
+      return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
+    });
+    const page = await handle(req("https://example.com/?x=1"), baseEnv({ HTML_STUDIO: binding }), createExecutionContext());
+    const text = await page.text();
+    expect(text.match(/rel="canonical"/g)?.length).toBe(1);
+    expect(text).toContain('rel="canonical" href="https://example.com/"');
+    expect(text).toContain('rel="alternate" href="https://example.com/feed.xml"');
+    expect(text).toContain('name="twitter:url" content="https://example.com/"');
+    expect(text).not.toContain("sites.registermysite.com");
+    const sitemap = await handle(req("https://example.com/sitemap.xml"), baseEnv({ HTML_STUDIO: binding }), createExecutionContext());
+    expect(await sitemap.text()).toBe("<url><loc>https://example.com/</loc></url>");
+    const robots = await handle(req("https://example.com/robots.txt"), baseEnv({ HTML_STUDIO: binding }), createExecutionContext());
+    expect(await robots.text()).not.toContain("sites.registermysite.com");
+  });
+
   it("serves branded 404, 503, and 502 pages", async () => {
     const missing = await handle(req("https://unmapped.example/"), baseEnv(), createExecutionContext());
     expect(missing.status).toBe(404);
@@ -266,7 +351,7 @@ describe("handler", () => {
     try {
       const res = await handle(req("https://example.com/"), baseEnv(), createExecutionContext());
       expect(res.status).toBe(200);
-      expect(await res.text()).toContain("https://sites.registermysite.com/nightshade/");
+      expect(await res.text()).toContain("https://example.com/");
     } finally {
       globalThis.fetch = original;
     }

@@ -56,3 +56,16 @@ export function htmlContentType(contentType: string | null): boolean {
 export function cssContentType(contentType: string | null): boolean {
   return !!contentType && contentType.toLowerCase().includes("text/css");
 }
+
+export function textContentType(contentType: string | null): boolean {
+  if (!contentType) return false;
+  const type = contentType.toLowerCase();
+  return (
+    type.includes("text/plain") ||
+    type.includes("text/markdown") ||
+    type.includes("application/xml") ||
+    type.includes("text/xml") ||
+    type.includes("application/rss+xml") ||
+    type.includes("application/json")
+  );
+}

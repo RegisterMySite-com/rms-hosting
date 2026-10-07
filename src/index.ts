@@ -11,7 +11,7 @@ import {
 } from "./host";
 import { badRequest, domainNotSetup, methodNotAllowed, pageNotFound, pausedPage, unavailablePage } from "./pages";
 import { safePath } from "./path";
-import { rewriteLocation, type RewriteCtx } from "./rewrite";
+import { rewriteLocation, rewriteTextStream, type RewriteCtx } from "./rewrite";
 import { VERSION, type DomainMapping, type Env } from "./types";
 import {
   buildUpstreamUrl,
@@ -20,6 +20,7 @@ import {
   edgeTtl,
   htmlContentType,
   shouldRetryPretty,
+  textContentType,
   upstreamHeaders,
 } from "./upstream";
 
@@ -154,7 +155,11 @@ export async function handle(request: Request, env: Env, ctx: ExecutionContext):
   const type = response.headers.get("content-type");
   const live = mapping.status === "live";
   if (htmlContentType(type) && request.method === "GET") {
-    response = rewriteHtml(response, rewriteCtx, parsed.path, url.search, live);
+    response = rewriteHtml(response, rewriteCtx, parsed.path, "", live);
+  } else if (textContentType(type) && request.method === "GET") {
+    const headers = new Headers(response.headers);
+    headers.delete("content-length");
+    response = new Response(rewriteTextStream(response.body, rewriteCtx), { status: response.status, statusText: response.statusText, headers });
   } else if (cssContentType(type)) {
     // Inspection (2026-10-06): HTML Studio exports inline their CSS and use
     // absolute third-party URLs. Wrangler rewrites HTML href/src and injects
@@ -176,15 +181,30 @@ export async function handle(request: Request, env: Env, ctx: ExecutionContext):
 }
 
 async function internal(request: Request, env: Env, host: string, path: string): Promise<Response> {
-  const headers = { "cache-control": "no-store", "content-type": "application/json; charset=utf-8" };
+  const headers = {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+    "x-rms-version": VERSION,
+  };
+  const lookup = await resolveMapping(env, host);
+  const mapping = lookup?.mapping || null;
+  const canonical = mapping ? canonicalHost(host, mapping.canonical) : null;
   if (path === "/__rms/health") {
-    const mapped = !!(await readMapping(env, host));
-    return Response.json({ ok: true, version: VERSION, host, mapped }, { headers });
+    return Response.json(
+      {
+        mapped: !!mapping,
+        status: mapping?.status ?? null,
+        app: mapping?.app ?? null,
+        ref: mapping?.ref ?? null,
+        version: VERSION,
+        canonical,
+      },
+      { headers },
+    );
   }
-  const mapping = await readMapping(env, host);
-  if (!mapping) return Response.json({ error: "not_mapped" }, { status: 404, headers });
+  if (!mapping) return Response.json({ error: "not_mapped", version: VERSION }, { status: 404, headers });
   return Response.json(
-    { site_id: mapping.site_id, app: mapping.app, canonical: mapping.canonical },
+    { site_id: mapping.site_id, app: mapping.app, ref: mapping.ref, canonical, version: VERSION },
     { headers: { ...headers, "x-rms-host": mapping.site_id } },
   );
 }
@@ -270,6 +290,7 @@ function withProxyHeaders(response: Response, siteId: string, cache: "HIT" | "MI
   const headers = new Headers(response.headers);
   headers.set("x-rms-host", siteId);
   headers.set("x-rms-cache", cache);
+  headers.set("x-rms-version", VERSION);
   headers.set("x-content-type-options", "nosniff");
   headers.set("referrer-policy", "strict-origin-when-cross-origin");
   headers.set("x-frame-options", "SAMEORIGIN");

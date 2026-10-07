@@ -88,6 +88,61 @@ export function rewriteLocation(location: string, ctx: RewriteCtx, requestUrl: U
   return location;
 }
 
-export function canonicalUrl(host: string, path: string, search: string): string {
-  return `https://${host}${path}${search}`;
+export function platformReplacements(ctx: RewriteCtx): { from: string; to: string }[] {
+  const studio = originOf(ctx.studioOrigin);
+  const wrangler = originOf(ctx.wranglerOrigin);
+  const prefix = ctx.wranglerPrefix.startsWith("/") ? ctx.wranglerPrefix : `/${ctx.wranglerPrefix}`;
+  const normalizedPrefix = prefix.endsWith("/") ? prefix : `${prefix}/`;
+  const to = `https://${ctx.canonicalHost}/`;
+  return [
+    { from: `${studio}/${ctx.ref}/`, to },
+    { from: `${wrangler}${normalizedPrefix}${ctx.ref}/`, to },
+  ];
+}
+
+/** Replace platform publish prefixes in a text body. Full matches only. */
+export function rewriteText(body: string, ctx: RewriteCtx): string {
+  let out = body;
+  for (const { from, to } of platformReplacements(ctx)) {
+    if (!from || from === to) continue;
+    out = out.split(from).join(to);
+  }
+  return out;
+}
+
+export function rewriteTextStream(body: ReadableStream<Uint8Array> | null, ctx: RewriteCtx): ReadableStream<Uint8Array> | null {
+  if (!body) return body;
+  const needles = platformReplacements(ctx);
+  const keep = Math.max(1, ...needles.map((item) => item.from.length)) - 1;
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let carry = "";
+  return body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        carry += decoder.decode(chunk, { stream: true });
+        const rewritten = rewriteText(carry, ctx);
+        if (rewritten.length <= keep) {
+          carry = rewritten;
+          return;
+        }
+        controller.enqueue(encoder.encode(rewritten.slice(0, rewritten.length - keep)));
+        carry = rewritten.slice(rewritten.length - keep);
+      },
+      flush(controller) {
+        carry += decoder.decode();
+        if (carry) controller.enqueue(encoder.encode(rewriteText(carry, ctx)));
+      },
+    }),
+  );
+}
+
+/** Canonical link is the canonical host plus the path. No query, no index.html, no double slash. */
+export function canonicalUrl(host: string, path: string, _search = ""): string {
+  let clean = path || "/";
+  clean = clean.replace(/\/{2,}/g, "/");
+  if (!clean.startsWith("/")) clean = `/${clean}`;
+  clean = clean.replace(/\/index\.html$/i, "/");
+  if (!clean) clean = "/";
+  return `https://${host}${clean}`;
 }
