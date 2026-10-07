@@ -94,9 +94,14 @@ export function platformReplacements(ctx: RewriteCtx): { from: string; to: strin
   const prefix = ctx.wranglerPrefix.startsWith("/") ? ctx.wranglerPrefix : `/${ctx.wranglerPrefix}`;
   const normalizedPrefix = prefix.endsWith("/") ? prefix : `${prefix}/`;
   const to = `https://${ctx.canonicalHost}/`;
+  const studioHost = studio.replace(/^https?:\/\//, "");
+  const wranglerHost = wrangler.replace(/^https?:\/\//, "");
   return [
     { from: `${studio}/${ctx.ref}/`, to },
     { from: `${wrangler}${normalizedPrefix}${ctx.ref}/`, to },
+    // llms.txt emits the publish host with no scheme: "sites.registermysite.com/<ref>"
+    { from: `${studioHost}/${ctx.ref}`, to: ctx.canonicalHost },
+    { from: `${wranglerHost}${normalizedPrefix}${ctx.ref}`, to: ctx.canonicalHost },
   ];
 }
 

@@ -36,7 +36,7 @@ Examples: `host:ryanswansontattoos.com`, `host:www.ryanswansontattoos.com`
 | `site_id` | yes | stable id of the site. Returned as `x-rms-host` and by `GET /__rms/whoami`. |
 | `app` | yes | `html_studio` or `wrangler`. Anything else is a miss. |
 | `ref` | yes | HTML Studio publish slug, or Wrangler deploy slug. No slashes. |
-| `canonical` | no | `apex` (default) or `www`. The other host 301s here. |
+| `canonical` | no | `apex` (default) or `www`. `www` always 301s to the bare domain. The bare domain is the canonical host. |
 | `status` | no | `live` (default) or `paused`. Paused serves a branded 503 with `Retry-After`. |
 | `version` | no | integer, default `1`. Bump on republish, slug change, or app switch. It is part of the edge cache key, so old HTML stops matching. |
 | `updated_at` | no | ISO-8601 timestamp. Informational. |

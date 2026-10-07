@@ -151,15 +151,15 @@ describe("handler", () => {
     expect(blocked.status).toBe(404);
   });
 
-  it("redirects www to apex, apex to www, and http to https", async () => {
+  it("redirects www to the bare domain even when the www row says canonical www", async () => {
     await putMap("example.com", live);
     await putMap("www.other.com", { ...live, canonical: "www" });
     const www = await handle(req("https://www.example.com/about?x=1"), baseEnv(), createExecutionContext());
     expect(www.status).toBe(301);
     expect(www.headers.get("location")).toBe("https://example.com/about?x=1");
-    const apex = await handle(req("https://other.com/"), baseEnv(), createExecutionContext());
-    expect(apex.status).toBe(301);
-    expect(apex.headers.get("location")).toBe("https://www.other.com/");
+    const labeled = await handle(req("https://www.other.com/"), baseEnv(), createExecutionContext());
+    expect(labeled.status).toBe(301);
+    expect(labeled.headers.get("location")).toBe("https://other.com/");
     const http = await handle(req("http://example.com/about"), baseEnv(), createExecutionContext());
     expect(http.status).toBe(301);
     expect(http.headers.get("location")).toBe("https://example.com/about");
@@ -294,6 +294,11 @@ describe("handler", () => {
           headers: { "content-type": "text/plain" },
         });
       }
+      if (url.includes("/llms.txt")) {
+        return new Response("- **Domain**: sites.registermysite.com/nightshade\n", {
+          headers: { "content-type": "text/markdown" },
+        });
+      }
       return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
     });
     const page = await handle(req("https://example.com/?x=1"), baseEnv({ HTML_STUDIO: binding }), createExecutionContext());
@@ -307,6 +312,10 @@ describe("handler", () => {
     expect(await sitemap.text()).toBe("<url><loc>https://example.com/</loc></url>");
     const robots = await handle(req("https://example.com/robots.txt"), baseEnv({ HTML_STUDIO: binding }), createExecutionContext());
     expect(await robots.text()).not.toContain("sites.registermysite.com");
+    const llms = await handle(req("https://example.com/llms.txt"), baseEnv({ HTML_STUDIO: binding }), createExecutionContext());
+    const llmsText = await llms.text();
+    expect(llmsText).toBe("- **Domain**: example.com\n");
+    expect(llmsText).not.toContain("sites.registermysite.com");
   });
 
   it("serves branded 404, 503, and 502 pages", async () => {

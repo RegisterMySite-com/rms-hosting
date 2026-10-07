@@ -2,7 +2,6 @@ import { parseMapping, kvKey } from "./contract";
 import { rewriteHtml } from "./html";
 import {
   apexOf,
-  canonicalHost,
   devOverrideHost,
   isPlatformHost,
   normalizeHost,
@@ -93,7 +92,7 @@ export async function handle(request: Request, env: Env, ctx: ExecutionContext):
     return response;
   }
 
-  const canon = canonicalHost(host, mapping.canonical);
+  const canon = apexOf(host);
   const rewriteCtx: RewriteCtx = {
     ref: mapping.ref,
     app: mapping.app,
@@ -188,7 +187,7 @@ async function internal(request: Request, env: Env, host: string, path: string):
   };
   const lookup = await resolveMapping(env, host);
   const mapping = lookup?.mapping || null;
-  const canonical = mapping ? canonicalHost(host, mapping.canonical) : null;
+  const canonical = mapping ? apexOf(host) : null;
   if (path === "/__rms/health") {
     return Response.json(
       {
@@ -221,18 +220,13 @@ async function readMapping(env: Env, host: string): Promise<DomainMapping | null
 
 async function resolveMapping(env: Env, host: string): Promise<{ mapping: DomainMapping; redirectTo?: string } | null> {
   const direct = await readMapping(env, host);
-  if (direct) {
-    const expected = canonicalHost(host, direct.canonical);
-    if (expected !== host) return { mapping: direct, redirectTo: expected };
-    return { mapping: direct };
-  }
   const sibling = host.startsWith("www.") ? apexOf(host) : wwwOf(host);
-  const other = await readMapping(env, sibling);
-  if (!other) return null;
-  const expected = canonicalHost(sibling, other.canonical);
-  if (expected === host) return { mapping: other };
-  if (expected !== host) return { mapping: other, redirectTo: expected };
-  return null;
+  const mapping = direct || (await readMapping(env, sibling));
+  if (!mapping) return null;
+  // The bare domain is the canonical host. A www KV row with canonical "www"
+  // is the www record, not a preference, so it still redirects.
+  if (host.startsWith("www.")) return { mapping, redirectTo: apexOf(host) };
+  return { mapping };
 }
 
 async function fetchUpstream(
